@@ -1,10 +1,10 @@
 import React from 'react';
-import {
-	ActivityIndicator, FlatList, InteractionManager
-} from 'react-native';
+import { FlatList, InteractionManager, RefreshControl } from 'react-native';
 import PropTypes from 'prop-types';
 import orderBy from 'lodash/orderBy';
 import { Q } from '@nozbe/watermelondb';
+import moment from 'moment';
+import isEqual from 'lodash/isEqual';
 
 import styles from './styles';
 import database from '../../lib/database';
@@ -14,9 +14,11 @@ import log from '../../utils/log';
 import EmptyRoom from './EmptyRoom';
 import { isIOS } from '../../utils/deviceInfo';
 import { animateNextTransition } from '../../utils/layoutAnimation';
+import ActivityIndicator from '../../containers/ActivityIndicator';
 import debounce from '../../utils/debounce';
+import { themes } from '../../constants/colors';
 
-export class List extends React.Component {
+class List extends React.Component {
 	static propTypes = {
 		onEndReached: PropTypes.func,
 		renderFooter: PropTypes.func,
@@ -24,8 +26,10 @@ export class List extends React.Component {
 		rid: PropTypes.string,
 		t: PropTypes.string,
 		tmid: PropTypes.string,
+		theme: PropTypes.string,
 		listRef: PropTypes.func,
-		animated: PropTypes.bool
+		hideSystemMessages: PropTypes.array,
+		navigation: PropTypes.object
 	};
 
 	constructor(props) {
@@ -37,9 +41,18 @@ export class List extends React.Component {
 		this.state = {
 			loading: true,
 			end: false,
-			messages: []
+			messages: [],
+			refreshing: false,
+			animated: false
 		};
 		this.init();
+		this.didFocusListener = props.navigation.addListener('didFocus', () => {
+			if (this.mounted) {
+				this.setState({ animated: true });
+			} else {
+				this.state.animated = true;
+			}
+		});
 		console.timeEnd(`${ this.constructor.name } init`);
 	}
 
@@ -53,6 +66,12 @@ export class List extends React.Component {
 		const { rid, tmid } = this.props;
 		const db = database.active;
 
+		// handle servers with version < 3.0.0
+		let { hideSystemMessages = [] } = this.props;
+		if (!Array.isArray(hideSystemMessages)) {
+			hideSystemMessages = [];
+		}
+
 		if (tmid) {
 			try {
 				this.thread = await db.collections
@@ -63,12 +82,12 @@ export class List extends React.Component {
 			}
 			this.messagesObservable = db.collections
 				.get('thread_messages')
-				.query(Q.where('rid', tmid))
+				.query(Q.where('rid', tmid), Q.or(Q.where('t', Q.notIn(hideSystemMessages)), Q.where('t', Q.eq(null))))
 				.observe();
 		} else if (rid) {
 			this.messagesObservable = db.collections
 				.get('messages')
-				.query(Q.where('rid', rid))
+				.query(Q.where('rid', rid), Q.or(Q.where('t', Q.notIn(hideSystemMessages)), Q.where('t', Q.eq(null))))
 				.observe();
 		}
 
@@ -91,6 +110,12 @@ export class List extends React.Component {
 		}
 	}
 
+	// eslint-disable-next-line react/sort-comp
+	reload = () => {
+		this.unsubscribeMessages();
+		this.init();
+	}
+
 	// this.state.loading works for this.onEndReached and RoomView.init
 	static getDerivedStateFromProps(props, state) {
 		if (props.loading !== state.loading) {
@@ -102,14 +127,31 @@ export class List extends React.Component {
 	}
 
 	shouldComponentUpdate(nextProps, nextState) {
-		const { loading, end } = this.state;
+		const { loading, end, refreshing } = this.state;
+		const { hideSystemMessages, theme } = this.props;
+		if (theme !== nextProps.theme) {
+			return true;
+		}
 		if (loading !== nextState.loading) {
 			return true;
 		}
 		if (end !== nextState.end) {
 			return true;
 		}
+		if (refreshing !== nextState.refreshing) {
+			return true;
+		}
+		if (!isEqual(hideSystemMessages, nextProps.hideSystemMessages)) {
+			return true;
+		}
 		return false;
+	}
+
+	componentDidUpdate(prevProps) {
+		const { hideSystemMessages } = this.props;
+		if (!isEqual(hideSystemMessages, prevProps.hideSystemMessages)) {
+			this.reload();
+		}
 	}
 
 	componentWillUnmount() {
@@ -119,6 +161,9 @@ export class List extends React.Component {
 		}
 		if (this.onEndReached && this.onEndReached.stop) {
 			this.onEndReached.stop();
+		}
+		if (this.didFocusListener && this.didFocusListener.remove) {
+			this.didFocusListener.remove();
 		}
 		console.countReset(`${ this.constructor.name }.render calls`);
 	}
@@ -149,9 +194,31 @@ export class List extends React.Component {
 		}
 	}, 300)
 
+	onRefresh = () => this.setState({ refreshing: true }, async() => {
+		const { messages } = this.state;
+		const { rid, tmid } = this.props;
+
+		if (messages.length) {
+			try {
+				if (tmid) {
+					await RocketChat.loadThreadMessages({ tmid, rid, offset: messages.length - 1 });
+				} else {
+					await RocketChat.loadMissedMessages({ rid, lastOpen: moment().subtract(7, 'days').toDate() });
+				}
+			} catch (e) {
+				log(e);
+			}
+		}
+
+		this.setState({ refreshing: false });
+	})
+
 	// eslint-disable-next-line react/sort-comp
 	update = () => {
-		animateNextTransition();
+		const { animated } = this.state;
+		if (animated) {
+			animateNextTransition();
+		}
 		this.forceUpdate();
 	};
 
@@ -171,9 +238,9 @@ export class List extends React.Component {
 
 	renderFooter = () => {
 		const { loading } = this.state;
-		const { rid } = this.props;
+		const { rid, theme } = this.props;
 		if (loading && rid) {
-			return <ActivityIndicator style={styles.loading} />;
+			return <ActivityIndicator theme={theme} />;
 		}
 		return null;
 	}
@@ -187,10 +254,11 @@ export class List extends React.Component {
 	render() {
 		console.count(`${ this.constructor.name }.render calls`);
 		const { rid, listRef } = this.props;
-		const { messages } = this.state;
+		const { messages, refreshing } = this.state;
+		const { theme } = this.props;
 		return (
 			<>
-				<EmptyRoom rid={rid} length={messages.length} mounted={this.mounted} />
+				<EmptyRoom rid={rid} length={messages.length} mounted={this.mounted} theme={theme} />
 				<FlatList
 					testID='room-view-messages'
 					ref={listRef}
@@ -208,9 +276,18 @@ export class List extends React.Component {
 					maxToRenderPerBatch={5}
 					windowSize={10}
 					ListFooterComponent={this.renderFooter}
+					refreshControl={(
+						<RefreshControl
+							refreshing={refreshing}
+							onRefresh={this.onRefresh}
+							tintColor={themes[theme].auxiliaryText}
+						/>
+					)}
 					{...scrollPersistTaps}
 				/>
 			</>
 		);
 	}
 }
+
+export default List;

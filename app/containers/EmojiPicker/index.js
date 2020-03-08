@@ -2,7 +2,6 @@ import React, { Component } from 'react';
 import { View } from 'react-native';
 import PropTypes from 'prop-types';
 import ScrollableTabView from 'react-native-scrollable-tab-view';
-import { shortnameToUnicode } from 'emoji-toolkit';
 import equal from 'deep-equal';
 import { connect } from 'react-redux';
 import orderBy from 'lodash/orderBy';
@@ -15,7 +14,10 @@ import categories from './categories';
 import database from '../../lib/database';
 import { emojisByCategory } from '../../emojis';
 import protectedFunction from '../../lib/methods/helpers/protectedFunction';
+import shortnameToUnicode from '../../utils/shortnameToUnicode';
 import log from '../../utils/log';
+import { themes } from '../../constants/colors';
+import { withTheme } from '../../theme';
 
 const scrollProps = {
 	keyboardShouldPersistTaps: 'always',
@@ -27,7 +29,8 @@ class EmojiPicker extends Component {
 		baseUrl: PropTypes.string.isRequired,
 		customEmojis: PropTypes.object,
 		onEmojiSelected: PropTypes.func,
-		tabEmojiStyle: PropTypes.object
+		tabEmojiStyle: PropTypes.object,
+		theme: PropTypes.string
 	};
 
 	constructor(props) {
@@ -54,6 +57,10 @@ class EmojiPicker extends Component {
 
 	shouldComponentUpdate(nextProps, nextState) {
 		const { frequentlyUsed, show, width } = this.state;
+		const { theme } = this.props;
+		if (nextProps.theme !== theme) {
+			return true;
+		}
 		if (nextState.show !== show) {
 			return true;
 		}
@@ -152,7 +159,7 @@ class EmojiPicker extends Component {
 
 	render() {
 		const { show, frequentlyUsed } = this.state;
-		const { tabEmojiStyle } = this.props;
+		const { tabEmojiStyle, theme } = this.props;
 
 		if (!show) {
 			return null;
@@ -160,9 +167,9 @@ class EmojiPicker extends Component {
 		return (
 			<View onLayout={this.onLayout} style={{ flex: 1 }}>
 				<ScrollableTabView
-					renderTabBar={() => <TabBar tabEmojiStyle={tabEmojiStyle} />}
+					renderTabBar={() => <TabBar tabEmojiStyle={tabEmojiStyle} theme={theme} />}
 					contentProps={scrollProps}
-					style={styles.background}
+					style={{ backgroundColor: themes[theme].focusedBackground }}
 				>
 					{
 						categories.tabs.map((tab, i) => (
@@ -181,4 +188,4 @@ const mapStateToProps = state => ({
 	customEmojis: state.customEmojis
 });
 
-export default connect(mapStateToProps)(EmojiPicker);
+export default connect(mapStateToProps)(withTheme(EmojiPicker));

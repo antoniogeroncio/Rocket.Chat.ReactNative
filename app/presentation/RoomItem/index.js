@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import PropTypes from 'prop-types';
 import { View, Text } from 'react-native';
 import { connect } from 'react-redux';
@@ -11,6 +11,7 @@ import TypeIcon from './TypeIcon';
 import LastMessage from './LastMessage';
 import { capitalize, formatDate } from '../../utils/room';
 import Touchable from './Touchable';
+import { themes } from '../../constants/colors';
 
 export { ROW_HEIGHT };
 
@@ -19,12 +20,14 @@ const attrs = [
 	'unread',
 	'userMentions',
 	'showLastMessage',
+	'useRealName',
 	'alert',
 	'type',
 	'width',
 	'isRead',
 	'favorite',
-	'status'
+	'status',
+	'theme'
 ];
 
 const arePropsEqual = (oldProps, newProps) => {
@@ -37,8 +40,15 @@ const arePropsEqual = (oldProps, newProps) => {
 };
 
 const RoomItem = React.memo(({
-	onPress, width, favorite, toggleFav, isRead, rid, toggleRead, hideChannel, testID, unread, userMentions, name, _updatedAt, alert, type, avatarSize, baseUrl, userId, username, token, id, prid, showLastMessage, hideUnreadStatus, lastMessage, status, avatar
+	onPress, width, favorite, toggleFav, isRead, rid, toggleRead, hideChannel, testID, unread, userMentions, name, _updatedAt, alert, type, avatarSize, baseUrl, userId, username, token, id, prid, showLastMessage, hideUnreadStatus, lastMessage, status, avatar, useRealName, getUserPresence, theme
 }) => {
+	useEffect(() => {
+		if (type === 'd' && rid) {
+			const uid = rid.replace(userId, '');
+			getUserPresence(uid);
+		}
+	}, []);
+
 	const date = formatDate(_updatedAt);
 
 	let accessibilityLabel = name;
@@ -68,6 +78,7 @@ const RoomItem = React.memo(({
 			hideChannel={hideChannel}
 			testID={testID}
 			type={type}
+			theme={theme}
 		>
 			<View
 				style={styles.container}
@@ -82,18 +93,27 @@ const RoomItem = React.memo(({
 					userId={userId}
 					token={token}
 				/>
-				<View style={styles.centerContainer}>
+				<View
+					style={[
+						styles.centerContainer,
+						{
+							borderColor: themes[theme].separatorColor
+						}
+					]}
+				>
 					<View style={styles.titleContainer}>
 						<TypeIcon
 							type={type}
 							id={id}
 							prid={prid}
 							status={status}
+							theme={theme}
 						/>
 						<Text
 							style={[
 								styles.title,
-								alert && !hideUnreadStatus && styles.alert
+								alert && !hideUnreadStatus && styles.alert,
+								{ color: themes[theme].titleText }
 							]}
 							ellipsizeMode='tail'
 							numberOfLines={1}
@@ -104,7 +124,19 @@ const RoomItem = React.memo(({
 							<Text
 								style={[
 									styles.date,
-									alert && !hideUnreadStatus && styles.updateAlert
+									{
+										color:
+											themes[theme]
+												.auxiliaryText
+									},
+									alert && !hideUnreadStatus && [
+										styles.updateAlert,
+										{
+											color:
+												themes[theme]
+													.tintColor
+										}
+									]
 								]}
 								ellipsizeMode='tail'
 								numberOfLines={1}
@@ -120,11 +152,14 @@ const RoomItem = React.memo(({
 							showLastMessage={showLastMessage}
 							username={username}
 							alert={alert && !hideUnreadStatus}
+							useRealName={useRealName}
+							theme={theme}
 						/>
 						<UnreadBadge
 							unread={unread}
 							userMentions={userMentions}
 							type={type}
+							theme={theme}
 						/>
 					</View>
 				</View>
@@ -160,16 +195,23 @@ RoomItem.propTypes = {
 	toggleRead: PropTypes.func,
 	hideChannel: PropTypes.func,
 	avatar: PropTypes.bool,
-	hideUnreadStatus: PropTypes.bool
+	hideUnreadStatus: PropTypes.bool,
+	useRealName: PropTypes.bool,
+	getUserPresence: PropTypes.func,
+	theme: PropTypes.string
 };
 
 RoomItem.defaultProps = {
 	avatarSize: 48,
-	status: 'offline'
+	status: 'offline',
+	getUserPresence: () => {}
 };
 
 const mapStateToProps = (state, ownProps) => ({
-	status: state.meteor.connected && ownProps.type === 'd' ? state.activeUsers[ownProps.id] : 'offline'
+	status:
+		state.meteor.connected && ownProps.type === 'd'
+			? state.activeUsers[ownProps.id]
+			: 'offline'
 });
 
 export default connect(mapStateToProps)(RoomItem);

@@ -6,6 +6,7 @@ import {
 	toggleServerDropdown, closeServerDropdown, closeSortDropdown, setSearch as setSearchAction
 } from '../../../actions/rooms';
 import Header from './Header';
+import { withTheme } from '../../../theme';
 import EventEmitter from '../../../utils/events';
 import { KEY_COMMAND, handleCommandOpenServerDropdown } from '../../../commands';
 import { isTablet } from '../../../utils/deviceInfo';
@@ -18,6 +19,7 @@ class RoomsListHeaderView extends PureComponent {
 		serverName: PropTypes.string,
 		connecting: PropTypes.bool,
 		isFetching: PropTypes.bool,
+		theme: PropTypes.string,
 		open: PropTypes.func,
 		close: PropTypes.func,
 		closeSort: PropTypes.func,
@@ -36,6 +38,7 @@ class RoomsListHeaderView extends PureComponent {
 		}
 	}
 
+	// eslint-disable-next-line react/sort-comp
 	handleCommands = ({ event }) => {
 		if (handleCommandOpenServerDropdown(event)) {
 			this.onPress();
@@ -65,18 +68,19 @@ class RoomsListHeaderView extends PureComponent {
 
 	render() {
 		const {
-			serverName, showServerDropdown, showSearchHeader, connecting, isFetching
+			serverName, showServerDropdown, showSearchHeader, connecting, isFetching, theme
 		} = this.props;
 
 		return (
 			<Header
+				theme={theme}
 				serverName={serverName}
 				showServerDropdown={showServerDropdown}
 				showSearchHeader={showSearchHeader}
 				connecting={connecting}
 				isFetching={isFetching}
 				onPress={this.onPress}
-				onSearchChangeText={text => this.onSearchChangeText(text)}
+				onSearchChangeText={this.onSearchChangeText}
 			/>
 		);
 	}
@@ -98,4 +102,4 @@ const mapDispatchtoProps = dispatch => ({
 	setSearch: searchText => dispatch(setSearchAction(searchText))
 });
 
-export default connect(mapStateToProps, mapDispatchtoProps)(RoomsListHeaderView);
+export default connect(mapStateToProps, mapDispatchtoProps)(withTheme(RoomsListHeaderView));

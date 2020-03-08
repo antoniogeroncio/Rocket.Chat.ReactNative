@@ -12,7 +12,7 @@ import Touchable from 'react-native-platform-touchable';
 import Markdown from '../markdown';
 import { CustomIcon } from '../../lib/Icons';
 import sharedStyles from '../../views/Styles';
-import { COLOR_BACKGROUND_CONTAINER, COLOR_BORDER, COLOR_PRIMARY } from '../../constants/colors';
+import { themes } from '../../constants/colors';
 import { isAndroid, isIOS } from '../../utils/deviceInfo';
 import { withSplit } from '../../split';
 
@@ -22,8 +22,6 @@ const styles = StyleSheet.create({
 		flexDirection: 'row',
 		alignItems: 'center',
 		height: 56,
-		backgroundColor: COLOR_BACKGROUND_CONTAINER,
-		borderColor: COLOR_BORDER,
 		borderWidth: 1,
 		borderRadius: 4,
 		marginBottom: 6
@@ -33,16 +31,12 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		backgroundColor: 'transparent'
 	},
-	playPauseImage: {
-		color: COLOR_PRIMARY
-	},
 	slider: {
 		flex: 1
 	},
 	duration: {
 		marginHorizontal: 12,
 		fontSize: 14,
-		...sharedStyles.textColorNormal,
 		...sharedStyles.textRegular
 	}
 });
@@ -57,19 +51,20 @@ const sliderAnimationConfig = {
 	delay: 0
 };
 
-const Button = React.memo(({ paused, onPress }) => (
+const Button = React.memo(({ paused, onPress, theme }) => (
 	<Touchable
 		style={styles.playPauseButton}
 		onPress={onPress}
 		hitSlop={BUTTON_HIT_SLOP}
 		background={Touchable.SelectableBackgroundBorderless()}
 	>
-		<CustomIcon name={paused ? 'play' : 'pause'} size={36} style={styles.playPauseImage} />
+		<CustomIcon name={paused ? 'play' : 'pause'} size={36} color={themes[theme].tintColor} />
 	</Touchable>
 ));
 
 Button.propTypes = {
 	paused: PropTypes.bool,
+	theme: PropTypes.string,
 	onPress: PropTypes.func
 };
 Button.displayName = 'MessageAudioButton';
@@ -79,7 +74,7 @@ class Audio extends React.Component {
 		file: PropTypes.object.isRequired,
 		baseUrl: PropTypes.string.isRequired,
 		user: PropTypes.object.isRequired,
-		useMarkdown: PropTypes.bool,
+		theme: PropTypes.string,
 		split: PropTypes.bool,
 		getCustomEmoji: PropTypes.func
 	}
@@ -99,7 +94,10 @@ class Audio extends React.Component {
 		const {
 			currentTime, duration, paused, uri
 		} = this.state;
-		const { file, split } = this.props;
+		const { file, split, theme } = this.props;
+		if (nextProps.theme !== theme) {
+			return true;
+		}
 		if (nextState.currentTime !== currentTime) {
 			return true;
 		}
@@ -158,7 +156,7 @@ class Audio extends React.Component {
 			uri, paused, currentTime, duration
 		} = this.state;
 		const {
-			user, baseUrl, file, getCustomEmoji, useMarkdown, split
+			user, baseUrl, file, getCustomEmoji, split, theme
 		} = this.props;
 		const { description } = file;
 
@@ -168,7 +166,13 @@ class Audio extends React.Component {
 
 		return (
 			<>
-				<View style={[styles.audioContainer, split && sharedStyles.tabletContent]}>
+				<View
+					style={[
+						styles.audioContainer,
+						{ backgroundColor: themes[theme].chatComponentBackground, borderColor: themes[theme].borderColor },
+						split && sharedStyles.tabletContent
+					]}
+				>
 					<Video
 						ref={this.setRef}
 						source={{ uri }}
@@ -178,7 +182,7 @@ class Audio extends React.Component {
 						paused={paused}
 						repeat={false}
 					/>
-					<Button paused={paused} onPress={this.togglePlayPause} />
+					<Button paused={paused} onPress={this.togglePlayPause} theme={theme} />
 					<Slider
 						style={styles.slider}
 						value={currentTime}
@@ -186,14 +190,15 @@ class Audio extends React.Component {
 						minimumValue={0}
 						animateTransitions
 						animationConfig={sliderAnimationConfig}
-						thumbTintColor={isAndroid && COLOR_PRIMARY}
-						minimumTrackTintColor={COLOR_PRIMARY}
+						thumbTintColor={isAndroid && themes[theme].tintColor}
+						minimumTrackTintColor={themes[theme].tintColor}
+						maximumTrackTintColor={themes[theme].auxiliaryText}
 						onValueChange={this.onValueChange}
 						thumbImage={isIOS && { uri: 'audio_thumb', scale: Dimensions.get('window').scale }}
 					/>
-					<Text style={styles.duration}>{this.duration}</Text>
+					<Text style={[styles.duration, { color: themes[theme].auxiliaryText }]}>{this.duration}</Text>
 				</View>
-				<Markdown msg={description} baseUrl={baseUrl} username={user.username} getCustomEmoji={getCustomEmoji} useMarkdown={useMarkdown} />
+				<Markdown msg={description} baseUrl={baseUrl} username={user.username} getCustomEmoji={getCustomEmoji} theme={theme} />
 			</>
 		);
 	}

@@ -6,7 +6,9 @@ import equal from 'deep-equal';
 
 import Header from './Header';
 import RightButtons from './RightButtons';
+import { withTheme } from '../../../theme';
 import RoomHeaderLeft from './RoomHeaderLeft';
+import { getUserSelector } from '../../../selectors/login';
 
 class RoomHeaderView extends Component {
 	static propTypes = {
@@ -18,14 +20,18 @@ class RoomHeaderView extends Component {
 		window: PropTypes.object,
 		status: PropTypes.string,
 		connecting: PropTypes.bool,
+		theme: PropTypes.string,
 		widthOffset: PropTypes.number,
 		goRoomActionsView: PropTypes.func
 	};
 
 	shouldComponentUpdate(nextProps) {
 		const {
-			type, title, status, window, connecting, goRoomActionsView, usersTyping
+			type, title, status, window, connecting, goRoomActionsView, usersTyping, theme
 		} = this.props;
+		if (nextProps.theme !== theme) {
+			return true;
+		}
 		if (nextProps.type !== type) {
 			return true;
 		}
@@ -55,7 +61,7 @@ class RoomHeaderView extends Component {
 
 	render() {
 		const {
-			window, title, type, prid, tmid, widthOffset, status = 'offline', connecting, usersTyping, goRoomActionsView
+			window, title, type, prid, tmid, widthOffset, status = 'offline', connecting, usersTyping, goRoomActionsView, theme
 		} = this.props;
 
 		return (
@@ -67,6 +73,7 @@ class RoomHeaderView extends Component {
 				status={status}
 				width={window.width}
 				height={window.height}
+				theme={theme}
 				usersTyping={usersTyping}
 				widthOffset={widthOffset}
 				goRoomActionsView={goRoomActionsView}
@@ -80,9 +87,9 @@ const mapStateToProps = (state, ownProps) => {
 	let status;
 	const { rid, type } = ownProps;
 	if (type === 'd') {
-		if (state.login.user && state.login.user.id) {
-			const { id: loggedUserId } = state.login.user;
-			const userId = rid.replace(loggedUserId, '').trim();
+		const user = getUserSelector(state);
+		if (user.id) {
+			const userId = rid.replace(user.id, '').trim();
 			status = state.activeUsers[userId];
 		}
 	}
@@ -94,6 +101,6 @@ const mapStateToProps = (state, ownProps) => {
 	};
 };
 
-export default responsive(connect(mapStateToProps)(RoomHeaderView));
+export default responsive(connect(mapStateToProps)(withTheme(RoomHeaderView)));
 
 export { RightButtons, RoomHeaderLeft };
