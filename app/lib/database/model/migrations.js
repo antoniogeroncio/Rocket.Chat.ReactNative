@@ -12,6 +12,34 @@ export default schemaMigrations({
 					]
 				})
 			]
+		},
+		{
+			toVersion: 3,
+			steps: [
+				addColumns({
+					table: 'subscriptions',
+					columns: [
+						{ name: 'hide_unread_status', type: 'boolean', isOptional: true }
+					]
+				})
+			]
+		},
+		{
+			toVersion: 4,
+			steps: [
+				addColumns({
+					table: 'messages',
+					columns: [
+						{ name: 'blocks', type: 'string', isOptional: true }
+					]
+				}),
+				addColumns({
+					table: 'slash_commands',
+					columns: [
+						{ name: 'app_id', type: 'string', isOptional: true }
+					]
+				})
+			]
 		}
 	]
 });

@@ -1,4 +1,5 @@
 import { sanitizedRaw } from '@nozbe/watermelondb/RawRecord';
+import { InteractionManager } from 'react-native';
 
 import database from '../../database';
 import { merge } from '../helpers/mergeSubscriptionsRooms';
@@ -9,6 +10,9 @@ import random from '../../../utils/random';
 import store from '../../createStore';
 import { roomsRequest } from '../../../actions/rooms';
 import { notificationReceived } from '../../../actions/notification';
+import { handlePayloadUserInteraction } from '../actions';
+import buildMessage from '../helpers/buildMessage';
+import RocketChat from '../../rocketchat';
 
 const removeListener = listener => listener.stop();
 
@@ -16,8 +20,12 @@ let connectedListener;
 let disconnectedListener;
 let streamListener;
 let subServer;
+let subQueue = {};
+let subTimer = null;
+let roomQueue = {};
+let roomTimer = null;
+const WINDOW_TIME = 500;
 
-// TODO: batch execution
 const createOrUpdateSubscription = async(subscription, room) => {
 	try {
 		const db = database.active;
@@ -66,10 +74,10 @@ const createOrUpdateSubscription = async(subscription, room) => {
 			} catch (error) {
 				try {
 					await db.action(async() => {
-						await roomsCollection.create((r) => {
+						await roomsCollection.create(protectedFunction((r) => {
 							r._raw = sanitizedRaw({ id: room._id }, roomsCollection.schema);
 							Object.assign(r, room);
-						});
+						}));
 					});
 				} catch (e) {
 					// Do nothing
@@ -96,24 +104,102 @@ const createOrUpdateSubscription = async(subscription, room) => {
 
 		const tmp = merge(subscription, room);
 		await db.action(async() => {
+			let sub;
 			try {
-				const sub = await subCollection.find(tmp.rid);
-				await sub.update((s) => {
-					Object.assign(s, tmp);
-				});
+				sub = await subCollection.find(tmp.rid);
 			} catch (error) {
-				await subCollection.create((s) => {
-					s._raw = sanitizedRaw({ id: tmp.rid }, subCollection.schema);
-					Object.assign(s, tmp);
-					if (s.roomUpdatedAt) {
-						s.roomUpdatedAt = new Date();
-					}
-				});
+				// Do nothing
 			}
+
+			const batch = [];
+			if (sub) {
+				try {
+					const update = sub.prepareUpdate((s) => {
+						Object.assign(s, tmp);
+					});
+					batch.push(update);
+				} catch (e) {
+					console.log(e);
+				}
+			} else {
+				try {
+					const create = subCollection.prepareCreate((s) => {
+						s._raw = sanitizedRaw({ id: tmp.rid }, subCollection.schema);
+						Object.assign(s, tmp);
+						if (s.roomUpdatedAt) {
+							s.roomUpdatedAt = new Date();
+						}
+					});
+					batch.push(create);
+				} catch (e) {
+					console.log(e);
+				}
+			}
+
+			if (tmp.lastMessage) {
+				const lastMessage = buildMessage(tmp.lastMessage);
+				const messagesCollection = db.collections.get('messages');
+				let messageRecord;
+				try {
+					messageRecord = await messagesCollection.find(lastMessage._id);
+				} catch (error) {
+					// Do nothing
+				}
+
+				if (messageRecord) {
+					batch.push(
+						messageRecord.prepareUpdate(() => {
+							Object.assign(messageRecord, lastMessage);
+						})
+					);
+				} else {
+					batch.push(
+						messagesCollection.prepareCreate((m) => {
+							m._raw = sanitizedRaw({ id: lastMessage._id }, messagesCollection.schema);
+							m.subscription.id = lastMessage.rid;
+							return Object.assign(m, lastMessage);
+						})
+					);
+				}
+			}
+
+			await db.batch(...batch);
 		});
 	} catch (e) {
 		log(e);
 	}
+};
+
+const debouncedUpdateSub = (subscription) => {
+	if (!subTimer) {
+		subTimer = setTimeout(() => {
+			const subBatch = subQueue;
+			subQueue = {};
+			subTimer = null;
+			Object.keys(subBatch).forEach((key) => {
+				InteractionManager.runAfterInteractions(() => {
+					createOrUpdateSubscription(subBatch[key]);
+				});
+			});
+		}, WINDOW_TIME);
+	}
+	subQueue[subscription.rid] = subscription;
+};
+
+const debouncedUpdateRoom = (room) => {
+	if (!roomTimer) {
+		roomTimer = setTimeout(() => {
+			const roomBatch = roomQueue;
+			roomQueue = {};
+			roomTimer = null;
+			Object.keys(roomBatch).forEach((key) => {
+				InteractionManager.runAfterInteractions(() => {
+					createOrUpdateSubscription(null, roomBatch[key]);
+				});
+			});
+		}, WINDOW_TIME);
+	}
+	roomQueue[room._id] = room;
 };
 
 export default function subscribeRooms() {
@@ -149,19 +235,19 @@ export default function subscribeRooms() {
 							sub.prepareDestroyPermanently(),
 							...messagesToDelete,
 							...threadsToDelete,
-							...threadMessagesToDelete,
+							...threadMessagesToDelete
 						);
 					});
 				} catch (e) {
 					log(e);
 				}
 			} else {
-				await createOrUpdateSubscription(data);
+				debouncedUpdateSub(data);
 			}
 		}
 		if (/rooms/.test(ev)) {
 			if (type === 'updated' || type === 'inserted') {
-				await createOrUpdateSubscription(null, data);
+				debouncedUpdateRoom(data);
 			}
 		}
 		if (/message/.test(ev)) {
@@ -171,6 +257,7 @@ export default function subscribeRooms() {
 				_id,
 				rid: args.rid,
 				msg: args.msg,
+				blocks: args.blocks,
 				ts: new Date(),
 				_updatedAt: new Date(),
 				status: messagesStatus.SENT,
@@ -194,7 +281,20 @@ export default function subscribeRooms() {
 		}
 		if (/notification/.test(ev)) {
 			const [notification] = ddpMessage.fields.args;
+			try {
+				const { payload: { rid } } = notification;
+				const subCollection = db.collections.get('subscriptions');
+				const sub = await subCollection.find(rid);
+				notification.title = RocketChat.getRoomTitle(sub);
+				notification.avatar = RocketChat.getRoomAvatar(sub);
+			} catch (e) {
+				// do nothing
+			}
 			store.dispatch(notificationReceived(notification));
+		}
+		if (/uiInteraction/.test(ev)) {
+			const { type: eventType, ...args } = type;
+			handlePayloadUserInteraction(eventType, args);
 		}
 	});
 
@@ -210,6 +310,16 @@ export default function subscribeRooms() {
 		if (streamListener) {
 			streamListener.then(removeListener);
 			streamListener = false;
+		}
+		subQueue = {};
+		roomQueue = {};
+		if (subTimer) {
+			clearTimeout(subTimer);
+			subTimer = false;
+		}
+		if (roomTimer) {
+			clearTimeout(roomTimer);
+			roomTimer = false;
 		}
 	};
 

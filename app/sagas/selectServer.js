@@ -4,6 +4,7 @@ import {
 import { Alert } from 'react-native';
 import RNUserDefaults from 'rn-user-defaults';
 import { sanitizedRaw } from '@nozbe/watermelondb/RawRecord';
+import semver from 'semver';
 
 import Navigation from '../lib/Navigation';
 import { SERVER } from '../actions/actionsTypes';
@@ -22,13 +23,20 @@ import { SERVERS, TOKEN, SERVER_URL } from '../constants/userDefaults';
 const getServerInfo = function* getServerInfo({ server, raiseError = true }) {
 	try {
 		const serverInfo = yield RocketChat.getServerInfo(server);
-		if (!serverInfo.success) {
+		let websocketInfo = { success: true };
+		if (raiseError) {
+			websocketInfo = yield RocketChat.getWebsocketInfo({ server });
+		}
+		if (!serverInfo.success || !websocketInfo.success) {
 			if (raiseError) {
-				Alert.alert(I18n.t('Oops'), I18n.t(serverInfo.message, serverInfo.messageOptions));
+				const info = serverInfo.success ? websocketInfo : serverInfo;
+				Alert.alert(I18n.t('Oops'), I18n.t(info.message, info.messageOptions));
 			}
 			yield put(serverFailure());
 			return;
 		}
+
+		const validVersion = semver.coerce(serverInfo.version);
 
 		const serversDB = database.servers;
 		const serversCollection = serversDB.collections.get('servers');
@@ -36,12 +44,12 @@ const getServerInfo = function* getServerInfo({ server, raiseError = true }) {
 			try {
 				const serverRecord = await serversCollection.find(server);
 				await serverRecord.update((record) => {
-					record.version = serverInfo.version;
+					record.version = validVersion;
 				});
 			} catch (e) {
 				await serversCollection.create((record) => {
 					record._raw = sanitizedRaw({ id: server }, serversCollection.schema);
-					record.version = serverInfo.version;
+					record.version = validVersion;
 				});
 			}
 		});
@@ -82,7 +90,7 @@ const handleSelectServer = function* handleSelectServer({ server, version, fetch
 		}
 
 		if (user) {
-			yield RocketChat.connect({ server, user });
+			yield RocketChat.connect({ server, user, logoutOnError: true });
 			yield put(setUser(user));
 			yield put(actions.appStart('inside'));
 		} else {
@@ -90,19 +98,10 @@ const handleSelectServer = function* handleSelectServer({ server, version, fetch
 			yield put(actions.appStart('outside'));
 		}
 
-		const db = database.active;
-		const serversCollection = db.collections.get('settings');
-		const settingsRecords = yield serversCollection.query().fetch();
-		const settings = Object.values(settingsRecords).map(item => ({
-			_id: item.id,
-			valueAsString: item.valueAsString,
-			valueAsBoolean: item.valueAsBoolean,
-			valueAsNumber: item.valueAsNumber,
-			_updatedAt: item._updatedAt
-		}));
-		yield put(actions.setAllSettings(RocketChat.parseSettings(settings.slice(0, settings.length))));
-
-		yield RocketChat.setCustomEmojis();
+		// We can't use yield here because fetch of Settings & Custom Emojis is slower
+		// and block the selectServerSuccess raising multiples errors
+		RocketChat.setSettings();
+		RocketChat.setCustomEmojis();
 
 		let serverInfo;
 		if (fetchVersion) {
